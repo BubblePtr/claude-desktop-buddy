@@ -51,6 +51,12 @@ This file applies to the entire repository.
 pio run
 ```
 
+- For clangd or other static-analysis tools, generate `compile_commands.json` with:
+
+```bash
+pio run -t compiledb
+```
+
 - If filesystem assets are changed, also verify with:
 
 ```bash

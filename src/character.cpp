@@ -25,9 +25,10 @@ static uint32_t  textNext = 0;
 
 static bool    loaded = false;
 static Palette pal = { 0xC2A6, 0x0000, 0xFFFF, 0x8410, 0x0000 };
-static char    basePath[48];
+static const uint8_t PATH_CAP = 64;
+static char    basePath[PATH_CAP];
 static const uint8_t MAX_GIFS = 32;
-static char    gifPaths[MAX_GIFS][32];
+static char    gifPaths[MAX_GIFS][PATH_CAP];
 static uint8_t stateStart[N_STATES];
 static uint8_t stateCount[N_STATES];
 static uint8_t stateRot[N_STATES];
@@ -137,7 +138,11 @@ static bool ensureCharacterFsMounted() {
 
   // begin() also fails when the FS is already mounted; treat a successful
   // root open as "mounted elsewhere" before assuming the partition is bad.
-  if (LittleFS.open("/")) return true;
+  File root = LittleFS.open("/");
+  if (root) {
+    root.close();
+    return true;
+  }
 
   Serial.println("[char] LittleFS mount failed; formatting");
   if (!LittleFS.begin(true)) {
@@ -145,6 +150,17 @@ static bool ensureCharacterFsMounted() {
     return false;
   }
 
+  return true;
+}
+
+static bool storeGifPath(uint8_t idx, const char* fn) {
+  if (!fn || !*fn) return false;
+  if (strlen(fn) >= PATH_CAP) {
+    Serial.printf("[char] gif filename too long[%u]: %s\n", idx, fn);
+    return false;
+  }
+
+  strcpy(gifPaths[idx], fn);
   return true;
 }
 
@@ -174,7 +190,7 @@ bool characterInit(const char* name) {
   }
 
   snprintf(basePath, sizeof(basePath), "/characters/%s", name);
-  char mpath[64];
+  char mpath[96];
   snprintf(mpath, sizeof(mpath), "%s/manifest.json", basePath);
 
   File mf = LittleFS.open(mpath, "r");
@@ -235,11 +251,17 @@ bool characterInit(const char* name) {
       for (JsonVariant e : v.as<JsonArray>()) {
         if (gifTotal >= MAX_GIFS) break;
         const char* fn = e.as<const char*>();
-        if (fn) { snprintf(gifPaths[gifTotal], 32, "%s", fn); gifTotal++; stateCount[i]++; }
+        if (storeGifPath(gifTotal, fn)) {
+          gifTotal++;
+          stateCount[i]++;
+        }
       }
     } else {
       const char* fn = v.as<const char*>();
-      if (fn) { snprintf(gifPaths[gifTotal], 32, "%s", fn); gifTotal++; stateCount[i] = 1; }
+      if (storeGifPath(gifTotal, fn)) {
+        gifTotal++;
+        stateCount[i] = 1;
+      }
     }
   }
 
@@ -300,7 +322,7 @@ void characterSetState(uint8_t s) {
   }
 
   uint8_t idx = stateStart[s] + stateRot[s];
-  char full[80];
+  char full[128];
   snprintf(full, sizeof(full), "%s/%s", basePath, gifPaths[idx]);
   if (gif.open(full, gifOpenCb, gifCloseCb, gifReadCb, gifSeekCb, gifDrawCb)) {
     gifOpen = true;

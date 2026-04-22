@@ -146,6 +146,8 @@ void buddySetPeek(bool peek) {
 }
 
 void buddyTick(uint8_t personaState) {
+  if (!spr) return;
+
   uint32_t now = millis();
   bool ticked = false;
   if ((int32_t)(now - nextTickAt) >= 0) {

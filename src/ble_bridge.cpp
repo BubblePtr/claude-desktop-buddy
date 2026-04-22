@@ -1,6 +1,7 @@
 #include "ble_bridge.h"
 #include <NimBLEDevice.h>
 #include <Arduino.h>
+#include <esp_system.h>
 #include <string.h>
 
 #define NUS_SERVICE_UUID "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
@@ -53,17 +54,14 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     mtu = newMtu;
     Serial.printf("[ble] mtu=%u\n", newMtu);
   }
-};
-
-// LE Secure Connections, passkey display: we show the passkey, central types it.
-class SecCallbacks : public NimBLESecurityCallbacks {
-  uint32_t onPassKeyRequest() override { return 0; }
-  bool onConfirmPIN(uint32_t) override { return false; }
-  bool onSecurityRequest() override { return true; }
-  void onPassKeyNotify(uint32_t pk) override {
-    passkey = pk;
-    Serial.printf("[ble] passkey %06lu\n", (unsigned long)pk);
+  uint32_t onPassKeyRequest() override {
+    if (passkey == 0) {
+      passkey = 100000 + (esp_random() % 900000);
+      Serial.printf("[ble] passkey %06lu\n", (unsigned long)passkey);
+    }
+    return passkey;
   }
+  bool onConfirmPIN(uint32_t) override { return false; }
   void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
     passkey = 0;
     secure  = desc->sec_state.encrypted && desc->sec_state.authenticated;
@@ -78,7 +76,6 @@ void bleInit(const char* deviceName) {
 
   NimBLEDevice::setSecurityAuth(true, true, true);  // bonding, MITM, SC
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
-  NimBLEDevice::setSecurityCallbacks(new SecCallbacks());
 
   server = NimBLEDevice::createServer();
   server->setCallbacks(new ServerCallbacks());
