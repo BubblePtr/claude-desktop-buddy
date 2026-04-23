@@ -18,7 +18,6 @@ const SPECIES = [
   "mushroom",
   "chonk",
 ];
-const HUD_WIDTH = 25;
 const KEEPALIVE_MS = 8000;
 
 const elements = {
@@ -28,7 +27,6 @@ const elements = {
   snapshotBtn: document.getElementById("snapshotBtn"),
   clearLogBtn: document.getElementById("clearLogBtn"),
   serialStatus: document.getElementById("serialStatus"),
-  mirrorState: document.getElementById("mirrorState"),
   snapshotStatus: document.getElementById("snapshotStatus"),
   serialLog: document.getElementById("serialLog"),
   speciesSelect: document.getElementById("speciesSelect"),
@@ -47,20 +45,6 @@ const elements = {
   promptHintInput: document.getElementById("promptHintInput"),
   autoApplyInput: document.getElementById("autoApplyInput"),
   clockHint: document.getElementById("clockHint"),
-  attentionBar: document.getElementById("attentionBar"),
-  petAscii: document.getElementById("petAscii"),
-  clockLayer: document.getElementById("clockLayer"),
-  clockTime: document.getElementById("clockTime"),
-  clockSeconds: document.getElementById("clockSeconds"),
-  clockDate: document.getElementById("clockDate"),
-  hudLayer: document.getElementById("hudLayer"),
-  hudSummary: document.getElementById("hudSummary"),
-  hudLine1: document.getElementById("hudLine1"),
-  hudLine2: document.getElementById("hudLine2"),
-  approvalLayer: document.getElementById("approvalLayer"),
-  approvalTimer: document.getElementById("approvalTimer"),
-  approvalTool: document.getElementById("approvalTool"),
-  approvalHint: document.getElementById("approvalHint"),
   snapshotAutoInput: document.getElementById("snapshotAutoInput"),
   snapshotIntervalSelect: document.getElementById("snapshotIntervalSelect"),
   snapshotCanvas: document.getElementById("snapshotCanvas"),
@@ -130,68 +114,6 @@ function getModel() {
   };
 }
 
-function computeClockState(now) {
-  const dow = now.getDay();
-  const hour = now.getHours();
-  const weekend = dow === 0 || dow === 6;
-  const friday = dow === 5;
-  const seconds = Math.floor(now.getTime() / 1000);
-
-  if (hour >= 1 && hour < 7) return "sleep";
-  if (weekend) return Math.floor(seconds / 8) % 6 === 0 ? "heart" : "sleep";
-  if (hour < 9) return Math.floor(seconds / 6) % 4 === 0 ? "idle" : "sleep";
-  if (hour === 12) return Math.floor(seconds / 5) % 3 === 0 ? "heart" : "idle";
-  if (friday && hour >= 15) return Math.floor(seconds / 4) % 3 === 0 ? "celebrate" : "idle";
-  if (hour >= 22 || hour === 0) return Math.floor(seconds / 7) % 3 === 0 ? "dizzy" : "sleep";
-  return Math.floor(seconds / 10) % 5 === 0 ? "sleep" : "idle";
-}
-
-function deriveState(model) {
-  if (model.preset === "clock") return computeClockState(new Date());
-  if (model.debugState !== "auto") return model.debugState;
-  if (model.preset === "approval" || model.waiting > 0) return "attention";
-  if (model.running > 0) return "busy";
-  return "idle";
-}
-
-function wrapLines(input, width, limit) {
-  if (!input) return [];
-  const words = input.split(/\s+/).filter(Boolean);
-  if (!words.length) return [];
-
-  const lines = [];
-  let line = "";
-  for (const word of words) {
-    const sep = line ? " " : "";
-    if ((line + sep + word).length > width) {
-      if (line) lines.push(line);
-      if (lines.length >= limit) return lines.slice(0, limit);
-      line = word.slice(0, width);
-      if (word.length > width) lines.push(line);
-      if (lines.length >= limit) return lines.slice(0, limit);
-      line = word.length > width ? word.slice(width) : word;
-      if (line.length > width) line = line.slice(0, width);
-      if (word.length > width) line = "";
-    } else {
-      line += sep + word;
-    }
-  }
-  if (line && lines.length < limit) lines.push(line);
-  return lines.slice(0, limit);
-}
-
-function buildHudLines(model) {
-  const wrapped = [];
-  for (const entry of model.entries) {
-    wrapped.push(...wrapLines(entry, HUD_WIDTH, 3));
-    if (wrapped.length >= 2) break;
-  }
-  if (!wrapped.length) {
-    wrapped.push(...wrapLines(model.msg || "preview: idle", HUD_WIDTH, 2));
-  }
-  return [wrapped[0] || "", wrapped[1] || ""];
-}
-
 function buildHeartbeat(model) {
   const heartbeat = {
     total: Math.max(model.total, model.running, model.waiting ? 1 : 0),
@@ -256,14 +178,6 @@ function scheduleApply() {
   autoApplyTimer = window.setTimeout(() => {
     applyToDevice();
   }, 120);
-}
-
-function updateClockMirror() {
-  if (!elements.clockTime || !elements.clockSeconds || !elements.clockDate) return;
-  const now = new Date();
-  elements.clockTime.textContent = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  elements.clockSeconds.textContent = `:${String(now.getSeconds()).padStart(2, "0")}`;
-  elements.clockDate.textContent = now.toLocaleDateString(undefined, { month: "short", day: "2-digit" });
 }
 
 function renderMirror() {
