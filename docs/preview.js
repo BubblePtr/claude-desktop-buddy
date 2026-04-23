@@ -320,6 +320,12 @@ function handleSerialLine(line) {
 
   const ack = payload.ack;
   if (ack === "screenshot") {
+    if (payload.ok === false) {
+      screenshotCapture = null;
+      setSnapshotStatus("snapshot failed");
+      appendLog("meta", `! snapshot failed: ${payload.error || "device rejected request"}`);
+      return;
+    }
     screenshotCapture = {
       format: payload.fmt,
       width: Number(payload.w) || 0,
@@ -413,6 +419,10 @@ async function disconnectSerial() {
   keepaliveTimer = null;
   window.clearInterval(snapshotTimer);
   snapshotTimer = null;
+
+  try {
+    if (writer) await sendJson({ cmd: "debug_state", state: "auto" });
+  } catch (_) {}
 
   try {
     await reader?.cancel();

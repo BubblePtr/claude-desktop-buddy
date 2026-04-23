@@ -1005,8 +1005,7 @@ void drawHUD() {
     snprintf(summary, sizeof(summary), "run %u wait %u total %u",
              tama.sessionsRunning, tama.sessionsWaiting, tama.sessionsTotal);
   } else {
-    strncpy(summary, tama.msg, sizeof(summary) - 1);
-    summary[sizeof(summary) - 1] = 0;
+    snprintf(summary, sizeof(summary), "offline");
   }
   summary[WIDTH] = 0;
   spr->setTextColor(p.body, p.bg);

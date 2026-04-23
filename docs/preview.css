@@ -23,7 +23,7 @@ html, body {
     radial-gradient(circle at top, rgba(240, 106, 44, 0.16), transparent 35%),
     linear-gradient(180deg, #d5cab3, #cec3ae 40%, #c5bba8);
   color: var(--ink);
-  font-family: "SF Mono", "Monaco", "Menlo", monospace;
+  font-family: "SF Mono", Monaco, Menlo, monospace;
 }
 
 body {
