@@ -5,6 +5,7 @@
 #include <SensorPCF85063.hpp>
 #include <LittleFS.h>
 #include <esp_mac.h>
+#include <mbedtls/base64.h>
 #include <stdarg.h>
 #include "ble_bridge.h"
 #include "data.h"
@@ -87,6 +88,70 @@ static void hwDisplayPush() {
   }
 }
 
+static uint8_t rgb565ToRgb332(uint16_t c) {
+  uint8_t r = (c >> 13) & 0x07;
+  uint8_t g = (c >> 8)  & 0x07;
+  uint8_t b = (c >> 3)  & 0x03;
+  return (uint8_t)((r << 5) | (g << 2) | b);
+}
+
+bool debugScreenshotWrite(Stream& out) {
+  if (!spr) return false;
+
+  const uint16_t* fb = spr->getFramebuffer();
+  if (!fb) return false;
+
+  const uint16_t w = spr->width();
+  const uint16_t h = spr->height();
+  const uint32_t totalBytes = (uint32_t)w * h;
+  const size_t rawChunkBytes = 240;
+  const size_t b64Bytes = ((rawChunkBytes + 2) / 3) * 4 + 1;
+  uint8_t raw[rawChunkBytes];
+  char b64[b64Bytes];
+  size_t rawUsed = 0;
+  uint32_t chunkSeq = 0;
+  uint32_t sentBytes = 0;
+
+  out.printf(
+    "{\"ack\":\"screenshot\",\"ok\":true,\"n\":0,"
+    "\"fmt\":\"rgb332\",\"w\":%u,\"h\":%u,\"bytes\":%lu,\"chunk\":%u}\n",
+    (unsigned)w, (unsigned)h, (unsigned long)totalBytes, (unsigned)rawChunkBytes
+  );
+
+  auto flushChunk = [&]() -> bool {
+    if (rawUsed == 0) return true;
+    size_t outLen = 0;
+    int rc = mbedtls_base64_encode(
+      (uint8_t*)b64, sizeof(b64), &outLen, raw, rawUsed
+    );
+    if (rc != 0) return false;
+    b64[outLen] = 0;
+    out.printf(
+      "{\"ack\":\"screenshot_chunk\",\"ok\":true,\"seq\":%lu,\"d\":\"%s\"}\n",
+      (unsigned long)chunkSeq++, b64
+    );
+    sentBytes += rawUsed;
+    rawUsed = 0;
+    return true;
+  };
+
+  for (uint16_t y = 0; y < h; y++) {
+    const uint16_t* row = fb + (size_t)y * w;
+    for (uint16_t x = 0; x < w; x++) {
+      raw[rawUsed++] = rgb565ToRgb332(row[x]);
+      if (rawUsed == rawChunkBytes && !flushChunk()) return false;
+    }
+  }
+
+  if (!flushChunk()) return false;
+
+  out.printf(
+    "{\"ack\":\"screenshot_end\",\"ok\":true,\"chunks\":%lu,\"bytes\":%lu}\n",
+    (unsigned long)chunkSeq, (unsigned long)sentBytes
+  );
+  return true;
+}
+
 #include "character.h"
 #include "stats.h"
 
@@ -106,6 +171,7 @@ const char* stateNames[] = { "sleep", "idle", "busy", "attention", "celebrate", 
 TamaState    tama;
 PersonaState baseState   = P_SLEEP;
 PersonaState activeState = P_SLEEP;
+int8_t       debugStateOverride = -1;   // -1 = auto, 0..6 = forced PersonaState
 uint32_t     oneShotUntil = 0;
 uint32_t     lastShakeCheck = 0;
 float        accelBaseline = 1.0f;
@@ -233,7 +299,10 @@ const uint8_t INFO_PG_CREDITS = 5;
 void applyDisplayMode() {
   bool peek = displayMode != DISP_NORMAL;
   characterSetPeek(peek);
+  characterSetPeekYOffset(0);
   buddySetPeek(peek);
+  buddySetPeekYOffset(0);
+  buddySetScaleOverride(0);
   spr->fillScreen(0x0000);
   characterInvalidate();
 }
@@ -456,11 +525,16 @@ static const char* const MON[] = {
   "Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"
 };
 static const char* const DOW[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+static const int CLOCK_CLEAR_Y = 126;
+static const int CLOCK_PEEK_SHIFT_Y = 0;
+static const int CLOCK_TIME_Y = 160;
+static const int CLOCK_DATE_Y = 208;
 
 static uint8_t clockDow() { return _clkDow % 7; }
 
 // Portrait-only clock (landscape removed — AMOLED canvas has no HW rotation).
-// Clears from y=90 downward, leaving the peek-mode pet above untouched.
+// On the squarer AMOLED canvas, reserve the upper region for the pet and the
+// lower region for the clock so they never redraw over each other.
 static void drawClock() {
   const Palette& p = characterPalette();
   char hm[6]; snprintf(hm, sizeof(hm), "%02u:%02u", _clkH, _clkM);
@@ -468,31 +542,60 @@ static void drawClock() {
   uint8_t mi = (_clkMo >= 1 && _clkMo <= 12) ? _clkMo - 1 : 0;
   char dl[8]; snprintf(dl, sizeof(dl), "%s %02u", MON[mi], _clkD);
 
-  spr->fillRect(0, 90, W, H - 90, p.bg);
-  spr->setTextColor(p.text, p.bg);
+  spr->fillRect(0, CLOCK_CLEAR_Y, W, H - CLOCK_CLEAR_Y, p.bg);
+  spr->setTextSize(3);
+  int timeX = CX - (int)((strlen(hm) + strlen(ss)) * 18) / 2;
 
-  // HH:MM — textSize 4, each char 24×32 px, center at y=132
-  spr->setTextSize(4);
-  spr->setCursor(CX - (int)(strlen(hm) * 24) / 2, 116);
+  spr->setTextColor(p.text, p.bg);
+  spr->setCursor(timeX, CLOCK_TIME_Y);
   spr->print(hm);
 
-  // :SS — textSize 2, 12×16 px, center at y=163
-  spr->setTextSize(2);
+  // Seconds stay on the same line, dimmed rather than pushed to a second row.
   spr->setTextColor(p.textDim, p.bg);
-  spr->setCursor(CX - (int)(strlen(ss) * 12) / 2, 155);
+  spr->setCursor(timeX + (int)strlen(hm) * 18, CLOCK_TIME_Y);
   spr->print(ss);
 
-  // Date — textSize 1, 6×8 px, center at y=183
+  // Date — textSize 1, 6×8 px.
   spr->setTextSize(1);
-  spr->setCursor(CX - (int)(strlen(dl) * 6) / 2, 179);
+  spr->setCursor(CX - (int)(strlen(dl) * 6) / 2, CLOCK_DATE_Y);
   spr->print(dl);
 }
 
+static void renderPetSurface() {
+  if (buddyMode) {
+    buddyTick(activeState);
+  } else if (characterLoaded()) {
+    characterSetState(activeState);
+    characterTick();
+  } else {
+    const Palette& p = characterPalette();
+    spr->fillScreen(p.bg);
+    spr->setTextColor(p.textDim, p.bg);
+    spr->setTextSize(1);
+    if (xferActive()) {
+      uint32_t done = xferProgress(), total = xferTotal();
+      spr->setCursor(8, 90);
+      spr->print("installing");
+      spr->setCursor(8, 102);
+      spr->printf("%luK / %luK", done/1024, total/1024);
+      int barW = W - 16;
+      spr->drawRect(8, 116, barW, 8, p.textDim);
+      if (total > 0) {
+        int fill = (int)((uint64_t)barW * done / total);
+        if (fill > 1) spr->fillRect(9, 117, fill - 1, 6, p.body);
+      }
+    } else {
+      spr->setCursor(8, 100);
+      spr->print("no character loaded");
+    }
+  }
+}
+
 PersonaState derive(const TamaState& s) {
-  if (!s.connected)            return P_IDLE;
+  if (!s.connected)            return P_SLEEP;
   if (s.sessionsWaiting > 0)   return P_ATTENTION;
   if (s.recentlyCompleted)     return P_CELEBRATE;
-  if (s.sessionsRunning >= 3)  return P_BUSY;
+  if (s.sessionsRunning > 0)   return P_BUSY;
   return P_IDLE;
 }
 
@@ -576,6 +679,8 @@ void drawInfo() {
     ln("    deny prompt"); y += 4;
     spr->setTextColor(p.text, p.bg);    ln("hold A");
     spr->setTextColor(p.textDim, p.bg); ln("    menu"); y += 4;
+    spr->setTextColor(p.text, p.bg);    ln("hold A + tap B");
+    spr->setTextColor(p.textDim, p.bg); ln("    next ascii pet"); y += 4;
     spr->setTextColor(p.text, p.bg);    ln("hold PWR");
     spr->setTextColor(p.textDim, p.bg); ln("    power off");
 
@@ -886,21 +991,33 @@ void drawPet() {
 void drawHUD() {
   if (tama.promptId[0]) { drawApproval(); return; }
   const Palette& p = characterPalette();
-  const int SHOW = 3, LH = 8;
+  const int SHOW = 2, LH = 8;
   const int PAD = 16;
   const int WIDTH = (W - PAD * 2) / 6;
-  const int AREA = SHOW * LH + 4;
+  const int AREA = (SHOW + 1) * LH + 4;
   spr->fillRect(0, H - AREA, W, AREA, p.bg);
   spr->setTextSize(1);
 
   if (tama.lineGen != lastLineGen) { msgScroll = 0; lastLineGen = tama.lineGen; wake(); }
+
+  char summary[30];
+  if (tama.connected) {
+    snprintf(summary, sizeof(summary), "run %u wait %u total %u",
+             tama.sessionsRunning, tama.sessionsWaiting, tama.sessionsTotal);
+  } else {
+    snprintf(summary, sizeof(summary), "offline");
+  }
+  summary[WIDTH] = 0;
+  spr->setTextColor(p.body, p.bg);
+  spr->setCursor(PAD, H - AREA + 2);
+  spr->print(summary);
 
   if (tama.nLines == 0) {
     spr->setTextColor(p.text, p.bg);
     static char line[30];
     strncpy(line, tama.msg, WIDTH);
     line[WIDTH] = 0;
-    spr->setCursor(PAD, H - LH - 2);
+    spr->setCursor(PAD, H - AREA + 2 + LH);
     spr->print(line);
     return;
   }
@@ -924,7 +1041,7 @@ void drawHUD() {
     uint8_t row = start + i;
     bool fresh = (srcOf[row] == newest) && (msgScroll == 0);
     spr->setTextColor(fresh ? p.text : p.textDim, p.bg);
-    spr->setCursor(PAD, H - AREA + 2 + i * LH);
+    spr->setCursor(PAD, H - AREA + 2 + LH + i * LH);
     spr->print(disp[row]);
   }
   if (msgScroll > 0) {
@@ -1145,6 +1262,12 @@ void loop() {
   // BtnB (AXP short press)
   if (_axpShortPress && !screenOff) {
     if (swallowBtnB) { swallowBtnB = false; }
+    else if (btnA.isPressed() && !btnALong && !inPrompt
+             && !menuOpen && !settingsOpen && !resetOpen) {
+      beep(2400, 40);
+      nextPet();
+      swallowBtnA = true;
+    }
     else if (inPrompt) {
       char cmd[96];
       snprintf(cmd, sizeof(cmd), "{\"cmd\":\"permission\",\"id\":\"%s\",\"decision\":\"deny\"}", tama.promptId);
@@ -1183,8 +1306,15 @@ void loop() {
 
   static bool wasClocking = false;
   if (clocking != wasClocking) {
-    if (clocking) characterSetPeek(true);
-    else applyDisplayMode();
+    if (clocking) {
+      characterSetPeek(true);
+      characterSetPeekYOffset(CLOCK_PEEK_SHIFT_Y);
+      buddySetPeek(true);
+      buddySetPeekYOffset(CLOCK_PEEK_SHIFT_Y);
+      buddySetScaleOverride(2);
+    } else {
+      applyDisplayMode();
+    }
     characterInvalidate();
     if (buddyMode) buddyInvalidate();
     wasClocking = clocking;
@@ -1201,6 +1331,8 @@ void loop() {
     else if (friday && h >= 15)  activeState = (now/4000 % 3 == 0) ? P_CELEBRATE : P_IDLE;
     else if (h >= 22 || h == 0)  activeState = (now/7000 % 3 == 0) ? P_DIZZY : P_SLEEP;
     else                         activeState = (now/10000 % 5 == 0) ? P_SLEEP : P_IDLE;
+  } else if (debugStateOverride >= 0 && debugStateOverride <= 6) {
+    activeState = (PersonaState)debugStateOverride;
   }
 
   static uint32_t lastPasskey = 0;
@@ -1210,33 +1342,7 @@ void loop() {
 
   // Render
   if (!napping && !screenOff) {
-    if (buddyMode) {
-      buddyTick(activeState);
-    } else if (characterLoaded()) {
-      characterSetState(activeState);
-      characterTick();
-    } else {
-      const Palette& p = characterPalette();
-      spr->fillScreen(p.bg);
-      spr->setTextColor(p.textDim, p.bg);
-      spr->setTextSize(1);
-      if (xferActive()) {
-        uint32_t done = xferProgress(), total = xferTotal();
-        spr->setCursor(8, 90);
-        spr->print("installing");
-        spr->setCursor(8, 102);
-        spr->printf("%luK / %luK", done/1024, total/1024);
-        int barW = W - 16;
-        spr->drawRect(8, 116, barW, 8, p.textDim);
-        if (total > 0) {
-          int fill = (int)((uint64_t)barW * done / total);
-          if (fill > 1) spr->fillRect(9, 117, fill - 1, 6, p.body);
-        }
-      } else {
-        spr->setCursor(8, 100);
-        spr->print("no character loaded");
-      }
-    }
+    if (!clocking) renderPetSurface();
   }
 
   if (!napping && !screenOff) {
@@ -1246,7 +1352,10 @@ void loop() {
     drawAttentionBorder(showBorder, p.bg);
 
     if (blePasskey()) drawPasskey();
-    else if (clocking) drawClock();
+    else if (clocking) {
+      renderPetSurface();
+      drawClock();
+    }
     else if (displayMode == DISP_INFO) drawInfo();
     else if (displayMode == DISP_PET)  drawPet();
     else if (settings().hud) drawHUD();

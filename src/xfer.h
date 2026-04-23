@@ -99,6 +99,41 @@ inline bool xferCommand(JsonDocument& doc) {
     return true;
   }
 
+  if (strcmp(cmd, "debug_state") == 0) {
+    const char* state = doc["state"];
+    extern int8_t debugStateOverride;
+    if (!state) {
+      _xAck("debug_state", false);
+      return true;
+    }
+
+    int8_t next = -2;
+    if (strcmp(state, "auto") == 0) next = -1;
+    else if (strcmp(state, "sleep") == 0) next = 0;
+    else if (strcmp(state, "idle") == 0) next = 1;
+    else if (strcmp(state, "busy") == 0) next = 2;
+    else if (strcmp(state, "attention") == 0) next = 3;
+    else if (strcmp(state, "celebrate") == 0) next = 4;
+    else if (strcmp(state, "dizzy") == 0) next = 5;
+    else if (strcmp(state, "heart") == 0) next = 6;
+
+    if (next < -1 || next > 6) {
+      _xAck("debug_state", false);
+      return true;
+    }
+
+    debugStateOverride = next;
+    _xAck("debug_state", true);
+    return true;
+  }
+
+  if (strcmp(cmd, "screenshot") == 0) {
+    extern bool debugScreenshotWrite(Stream& out);
+    bool ok = debugScreenshotWrite(Serial);
+    if (!ok) _xAck("screenshot", false);
+    return true;
+  }
+
   if (strcmp(cmd, "unpair") == 0) {
     bleClearBonds();
     _xAck("unpair", true);

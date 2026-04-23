@@ -43,11 +43,12 @@ static int         gifX = 0, gifY = 0, gifW = 0, gifH = 0;
 // in the upper 140px. No padding assumed in the source art.
 static const int   PEEK_TOP = 70;
 static bool        peekMode = false;
+static int16_t     peekYOffset = 0;
 static void gifPlace() {
   int outW = peekMode ? gifW / 2 : gifW;
   int outH = peekMode ? gifH / 2 : gifH;
   gifX = (spr->width() - outW) / 2;
-  gifY = peekMode ? (PEEK_TOP - outH) / 2 : (140 - outH) / 2;
+  gifY = peekMode ? (PEEK_TOP - outH) / 2 + peekYOffset : (140 - outH) / 2;
 }
 static uint32_t    nextFrameAt = 0;
 static uint32_t    animPauseUntil = 0;
@@ -277,6 +278,12 @@ const Palette& characterPalette() { return pal; }
 void characterSetPeek(bool peek) {
   if (peekMode == peek) return;
   peekMode = peek;
+  characterInvalidate();
+}
+
+void characterSetPeekYOffset(int16_t yOffset) {
+  if (peekYOffset == yOffset) return;
+  peekYOffset = yOffset;
   characterInvalidate();
 }
 

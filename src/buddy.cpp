@@ -32,6 +32,9 @@ const uint16_t BUDDY_BLUE   = 0x041F;
 // 2× on home screen, 1× in peek (PET/INFO). Species art is space-padded to
 // a fixed width for 1× alignment; at 2× we trim and re-center per line.
 static uint8_t _scale = 1;
+static int8_t  _peekYOffset = 0;
+static uint8_t _defaultScale = 1;
+static uint8_t _scaleOverride = 0;
 
 void buddyPrintLine(const char* line, int yPx, uint16_t color, int xOff) {
   int len = strlen(line);
@@ -48,7 +51,7 @@ void buddyPrintLine(const char* line, int yPx, uint16_t color, int xOff) {
 
 void buddyPrintSprite(const char* const* lines, uint8_t nLines, int yOffset, uint16_t color, int xOff) {
   spr->setTextSize(_scale);
-  int yBase = BUDDY_Y_BASE * _scale - (_scale - 1) * 14;
+  int yBase = BUDDY_Y_BASE * _scale - (_scale - 1) * 14 + _peekYOffset;
   for (uint8_t i = 0; i < nLines; i++) {
     buddyPrintLine(lines[i], yBase + (yOffset + i * BUDDY_CHAR_H) * _scale, color, xOff);
   }
@@ -139,9 +142,24 @@ static uint8_t lastDrawnSpecies = 0xFF;
 void buddyInvalidate() { lastDrawnState = 0xFF; }
 
 void buddySetPeek(bool peek) {
-  uint8_t s = peek ? 1 : 2;
-  if (s == _scale) return;
-  _scale = s;
+  _defaultScale = peek ? 1 : 2;
+  uint8_t next = _scaleOverride ? _scaleOverride : _defaultScale;
+  if (next == _scale) return;
+  _scale = next;
+  buddyInvalidate();
+}
+
+void buddySetPeekYOffset(int8_t yOffset) {
+  if (_peekYOffset == yOffset) return;
+  _peekYOffset = yOffset;
+  buddyInvalidate();
+}
+
+void buddySetScaleOverride(uint8_t scale) {
+  uint8_t next = scale ? scale : _defaultScale;
+  if (_scaleOverride == scale && _scale == next) return;
+  _scaleOverride = scale;
+  _scale = next;
   buddyInvalidate();
 }
 

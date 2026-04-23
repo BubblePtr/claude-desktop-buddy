@@ -22,10 +22,19 @@ waiting, and lets you approve or deny right from the device.
 
 ## Hardware
 
-The firmware targets ESP32 with the Arduino framework. As written, it
-depends on the M5StickCPlus library for its display, IMU, and button
-drivers—so you'll need that board, or a fork that swaps those drivers for
-your own pin layout.
+The firmware targets ESP32 with the Arduino framework. The current
+PlatformIO environment in `platformio.ini` targets the Waveshare AMOLED 1.8
+ESP32-S3 board (`waveshare-amoled-18`), and the pin/button mappings in
+`src/main.cpp` follow that hardware.
+
+For this board:
+
+- `A` is the upper right-side button
+- `B` is the lower right-side button
+- the USB-C port sits between `A` and `B`
+
+If you fork this to a different ESP32 board, update the pin, display, and
+button mappings accordingly.
 
 ## Flashing
 
@@ -68,18 +77,80 @@ If discovery isn't finding the stick:
 
 ## Controls
 
+Current `waveshare-amoled-18` button layout:
+
+- `A`: upper right-side button
+- `B`: lower right-side button
+- `USB-C`: between `A` and `B`
+
 |                         | Normal               | Pet         | Info        | Approval    |
 | ----------------------- | -------------------- | ----------- | ----------- | ----------- |
-| **A** (front)           | next screen          | next screen | next screen | **approve** |
-| **B** (right)           | scroll transcript    | next page   | next page   | **deny**    |
+| **A** (upper right)     | next screen          | next screen | next screen | **approve** |
+| **B** (lower right)     | scroll transcript    | next page   | next page   | **deny**    |
 | **Hold A**              | menu                 | menu        | menu        | menu        |
-| **Power** (left, short) | toggle screen off    |             |             |             |
-| **Power** (left, ~6s)   | hard power off       |             |             |             |
+| **Hold A + tap B**      | next ASCII pet       | next ASCII pet | next ASCII pet | —        |
+| **Hold B (~6s)**        | hard power off       |             |             |             |
 | **Shake**               | dizzy                |             |             | —           |
 | **Face-down**           | nap (energy refills) |             |             |             |
 
 The screen auto-powers-off after 30s of no interaction (kept on while an
 approval prompt is up). Any button press wakes it.
+
+## UI states
+
+The firmware has three primary display modes plus several temporary overlays.
+
+- `Normal`: the pet/character is shown with the Claude session HUD at the bottom.
+- `Pet`: pet stats/help pages.
+- `Info`: six info pages (`About`, `Buttons`, `Claude`, `Device`, `Bluetooth`, `Credits`).
+
+Transient overlays and special states:
+
+- `Approval`: replaces the HUD when Claude sends a permission prompt.
+- `Menu`: top-level menu with `settings`, `turn off`, `help`, `about`, `demo`, `close`.
+- `Settings`: `brightness`, `sound`, `bluetooth`, `wifi`, `led`, `transcript`, `ascii pet`, `reset`, `back`.
+- `Reset`: `delete char`, `factory reset`, `back`. Destructive actions require a second confirm tap within 3 seconds.
+- `Passkey`: shown during BLE pairing when a 6-digit passkey is requested.
+- `Clock`: shown on USB power while idle, with a valid RTC and no overlays active.
+- `Nap`: triggered by face-down detection; display dims until the device is turned face-up again.
+- `Screen off`: triggered after 30s idle on battery power; any button wakes it.
+
+Render priority is effectively:
+
+- `Passkey`
+- `Clock`
+- `Info` or `Pet`
+- `Normal` HUD
+- then overlay one of `Reset`, `Settings`, or `Menu` on top when open
+
+`Approval` is handled inside `Normal` and replaces the normal HUD contents.
+
+## Button behavior by context
+
+Physical buttons on the current `waveshare-amoled-18` board:
+
+- `A`: upper right-side `BOOT` button
+- `B`: lower right-side `PWR` button
+
+Global/default behavior:
+
+- `A` short press: cycle display mode `Normal -> Pet -> Info -> Normal`
+- `A` long press (~600ms): open/close menu
+- `B` long press (~6s): power off
+- `Hold A + tap B`: switch to the next ASCII pet
+- Shake: temporary `dizzy` animation
+- Face-down: enter nap
+
+Context-sensitive behavior:
+
+- `Normal`: `B` scrolls the transcript/HUD backlog
+- `Pet`: `B` changes page
+- `Info`: `B` changes page
+- `Menu`: `A` moves selection, `B` confirms
+- `Settings`: `A` moves selection, `B` changes/applies the selected item
+- `Reset`: `A` moves selection, `B` arms or confirms the selected reset action
+- `Approval`: `A` approves, `B` denies
+- `Screen off`: any button wakes the display; the wake tap is swallowed and does not trigger the normal action
 
 ## ASCII pets
 
@@ -136,6 +207,51 @@ See `characters/bufo/` for a working example.
 If you're iterating on a character and would rather skip the BLE round-trip,
 `tools/flash_character.py characters/bufo` stages it into `data/` and runs
 `pio run -t uploadfs` directly over USB.
+
+## ASCII preview tool
+
+For local ASCII pet debugging, this repo includes a Chromium-only preview page:
+
+```bash
+python3 -m http.server 8000
+```
+
+Then open:
+
+```text
+http://localhost:8000/docs/preview.html
+```
+
+The preview tool can:
+
+- drive the real device over Web Serial
+- switch species and send a local-only forced persona state
+- pull low-frequency USB screen snapshots into the same page so you can inspect
+  the real board output without saving image files
+
+The forced state command is intentionally repo-local and not part of
+`REFERENCE.md`:
+
+```json
+{"cmd":"debug_state","state":"auto|sleep|idle|busy|attention|celebrate|dizzy|heart"}
+```
+
+Use `auto` to clear the override and return to the normal firmware-derived
+state machine.
+
+The preview page also supports a repo-local USB screenshot command:
+
+```json
+{"cmd":"screenshot"}
+```
+
+It streams the current 184×224 framebuffer back over USB in chunked `rgb332`
+form for local debugging. This is intentionally outside the stable
+`REFERENCE.md` contract.
+
+For snapshot mode, prefer the page's higher USB baud options (`921600` by
+default). The mirror remains low-frequency, but the higher link speed keeps the
+refresh loop inside a practical debugging range.
 
 ## The seven states
 
