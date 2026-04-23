@@ -1,9 +1,9 @@
 #include "../buddy.h"
 #include "../buddy_common.h"
-#include <M5StickCPlus.h>
+#include <Arduino_GFX_Library.h>
 #include <string.h>
 
-extern TFT_eSprite spr;
+extern Arduino_Canvas* spr;
 
 namespace blob {
 
