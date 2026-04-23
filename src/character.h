@@ -24,5 +24,6 @@ void characterClose();   // close GIF + clear loaded flag; FS stays mounted   //
 // header strip; off renders full-size centered in the upper home area.
 // Adaptive to actual canvas height — no padding required in source art.
 void characterSetPeek(bool peek);
+void characterSetPeekYOffset(int16_t yOffset);
 
 const Palette& characterPalette();

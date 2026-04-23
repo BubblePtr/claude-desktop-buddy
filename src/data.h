@@ -70,7 +70,11 @@ inline bool dataRtcValid() { return _rtcValid; }
 static void _applyJson(const char* line, TamaState* out) {
   JsonDocument doc;
   if (deserializeJson(doc, line)) return;
-  if (xferCommand(doc)) { _lastLiveMs = millis(); return; }
+  // Commands such as status/name/char_* prove the BLE control channel works,
+  // but they are not the desktop heartbeat snapshots that drive the pet state.
+  // Only actual desktop-originated state/event payloads should keep the buddy
+  // in its "connected to Claude" mode.
+  if (xferCommand(doc)) return;
 
   // Bridge sends {"time":[epoch_sec, tz_offset_sec]}; gmtime_r on the
   // adjusted epoch yields local components including weekday.

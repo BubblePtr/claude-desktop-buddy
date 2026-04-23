@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ASCII Pet Preview</title>
+  <link rel="stylesheet" href="./preview.css">
+</head>
+<body>
+  <main class="app">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Local Debug Tool</p>
+        <h1>ASCII Pet Preview</h1>
+        <p class="lede">
+          Chromium-only debug page for driving the board over Web Serial and
+          pulling low-frequency real-device snapshots into the browser.
+        </p>
+      </div>
+      <div class="hero-actions">
+        <button id="connectBtn" class="primary">Connect</button>
+        <button id="disconnectBtn" disabled>Disconnect</button>
+      </div>
+    </section>
+
+    <section class="layout">
+      <section class="panel controls">
+        <div class="panel-head">
+          <h2>Device Control</h2>
+          <span id="serialStatus" class="status-chip">serial offline</span>
+        </div>
+
+        <div class="control-grid">
+          <label>
+            <span>Species</span>
+            <select id="speciesSelect"></select>
+          </label>
+
+          <label>
+            <span>Screen Preset</span>
+            <select id="presetSelect">
+              <option value="normal">Normal</option>
+              <option value="approval">Approval</option>
+              <option value="clock">Clock</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Persona State</span>
+            <select id="stateSelect">
+              <option value="auto">auto</option>
+              <option value="sleep">sleep</option>
+              <option value="idle">idle</option>
+              <option value="busy">busy</option>
+              <option value="attention">attention</option>
+              <option value="celebrate">celebrate</option>
+              <option value="dizzy">dizzy</option>
+              <option value="heart">heart</option>
+            </select>
+          </label>
+
+          <label>
+            <span>Total Sessions</span>
+            <input id="totalInput" type="number" min="0" step="1" value="1">
+          </label>
+
+          <label>
+            <span>Running</span>
+            <input id="runningInput" type="number" min="0" step="1" value="0">
+          </label>
+
+          <label>
+            <span>Waiting</span>
+            <input id="waitingInput" type="number" min="0" step="1" value="0">
+          </label>
+
+          <label class="wide">
+            <span>Message</span>
+            <input id="msgInput" type="text" value="preview: idle">
+          </label>
+
+          <label class="wide">
+            <span>Entry 1</span>
+            <input id="entry1Input" type="text" value="10:42 preview connected">
+          </label>
+
+          <label class="wide">
+            <span>Entry 2</span>
+            <input id="entry2Input" type="text" value="10:41 switching states">
+          </label>
+
+          <label class="wide">
+            <span>Entry 3</span>
+            <input id="entry3Input" type="text" value="10:39 mirroring ASCII pet">
+          </label>
+
+          <label>
+            <span>Tokens Today</span>
+            <input id="tokensTodayInput" type="number" min="0" step="1" value="31200">
+          </label>
+
+          <label>
+            <span>Prompt Tool</span>
+            <input id="promptToolInput" type="text" value="Edit">
+          </label>
+
+          <label class="wide">
+            <span>Prompt Hint</span>
+            <input id="promptHintInput" type="text" value="Edit src/buddies/cat.cpp">
+          </label>
+        </div>
+
+        <div class="action-row">
+          <button id="applyBtn" class="primary">Apply to Device</button>
+          <label class="checkbox">
+            <input id="autoApplyInput" type="checkbox">
+            <span>Auto-apply</span>
+          </label>
+        </div>
+
+        <p class="hint" id="clockHint">
+          Clock preset mirrors the firmware’s USB idle clock behavior. It sends
+          both a local time sync packet and an idle heartbeat.
+        </p>
+      </section>
+
+      <section class="panel mirror">
+        <div class="panel-head">
+          <h2>Device Preview</h2>
+          <span id="snapshotStatus" class="status-chip accent">snapshot idle</span>
+        </div>
+
+        <div class="mirror-grid">
+          <div class="mirror-column">
+            <div class="mini-head">
+              <h3>Real Board Snapshot</h3>
+            </div>
+
+            <div class="snapshot-controls">
+              <label>
+                <span>USB Baud</span>
+                <select id="baudSelect">
+                  <option value="921600">921600</option>
+                  <option value="460800">460800</option>
+                  <option value="230400">230400</option>
+                  <option value="115200">115200</option>
+                </select>
+              </label>
+
+              <label>
+                <span>Refresh</span>
+                <select id="snapshotIntervalSelect">
+                  <option value="1000">1s</option>
+                  <option value="2000" selected>2s</option>
+                  <option value="3000">3s</option>
+                </select>
+              </label>
+
+              <button id="snapshotBtn">Refresh Snapshot</button>
+              <label class="checkbox">
+                <input id="snapshotAutoInput" type="checkbox" checked>
+                <span>Auto-refresh</span>
+              </label>
+            </div>
+
+            <div class="snapshot-shell">
+              <canvas id="snapshotCanvas" width="184" height="224"></canvas>
+            </div>
+
+            <p id="snapshotMeta" class="hint compact">
+              Connect over USB to pull the real board framebuffer. Snapshot mode
+              requests the current 184×224 screen over USB and refreshes it
+              in-place. It is low-frequency by design, not video.
+            </p>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="panel log-panel">
+      <div class="panel-head">
+        <h2>Serial Log</h2>
+        <button id="clearLogBtn">Clear</button>
+      </div>
+      <div id="serialLog" class="serial-log">preview ready</div>
+    </section>
+  </main>
+
+  <script type="module" src="./preview.js"></script>
+</body>
+</html>
