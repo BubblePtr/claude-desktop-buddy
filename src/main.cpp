@@ -307,6 +307,11 @@ void applyDisplayMode() {
   characterInvalidate();
 }
 
+static void refreshBaseScreen() {
+  applyDisplayMode();
+  if (buddyMode) buddyInvalidate();
+}
+
 // ─── attention border animation (replaces GPIO LED) ──────────────────────────
 static void drawAttentionBorder(bool on, const uint16_t bg) {
   uint32_t now = millis();
@@ -1176,6 +1181,7 @@ void loop() {
 
   // Prompt arrival: beep, reset response flag
   if (strcmp(tama.promptId, lastPromptId) != 0) {
+    bool hadPrompt = lastPromptId[0];
     strncpy(lastPromptId, tama.promptId, sizeof(lastPromptId)-1);
     lastPromptId[sizeof(lastPromptId)-1] = 0;
     responseSent = false;
@@ -1185,9 +1191,11 @@ void loop() {
       beep(1200, 80);
       displayMode = DISP_NORMAL;
       menuOpen = settingsOpen = resetOpen = false;
-      applyDisplayMode();
-      characterInvalidate();
-      if (buddyMode) buddyInvalidate();
+      refreshBaseScreen();
+    } else if (hadPrompt) {
+      // Approval uses a taller panel than the normal HUD. Force a full
+      // base redraw when it closes so stale prompt text cannot linger.
+      refreshBaseScreen();
     }
   }
 
@@ -1338,6 +1346,7 @@ void loop() {
   static uint32_t lastPasskey = 0;
   uint32_t pk = blePasskey();
   if (pk && !lastPasskey) { wake(); beep(1800, 60); }
+  else if (!pk && lastPasskey) { refreshBaseScreen(); }
   lastPasskey = pk;
 
   // Render
