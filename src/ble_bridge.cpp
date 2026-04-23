@@ -30,6 +30,12 @@ static void rxPush(const uint8_t* p, size_t n) {
   }
 }
 
+static void rxClear() {
+  memset(rxBuf, 0, sizeof(rxBuf));
+  rxHead = 0;
+  rxTail = 0;
+}
+
 class RxCallbacks : public NimBLECharacteristicCallbacks {
   void onWrite(NimBLECharacteristic* c) override {
     std::string v = c->getValue();
@@ -47,6 +53,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     secure    = false;
     passkey   = 0;
     mtu       = 23;
+    rxClear();
     Serial.println("[ble] disconnected");
     NimBLEDevice::startAdvertising();
   }
