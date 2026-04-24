@@ -1,171 +1,201 @@
 # claude-desktop-buddy
 
-Claude for macOS and Windows can connect Claude Cowork and Claude Code to
-maker devices over BLE, so developers and makers can build hardware that
-displays permission prompts, recent messages, and other interactions. We've
-been impressed by the creativity of the maker community around Claude -
-providing a lightweight, opt-in API is our way of making it easier to build
-fun little hardware devices that integrate with Claude.
+Reference firmware for a BLE-connected Claude desktop buddy running on the
+Waveshare ESP32-S3-Touch-AMOLED-1.8 board.
 
-> **Building your own device?** You don't need any of the code here. See
-> **[REFERENCE.md](REFERENCE.md)** for the wire protocol: Nordic UART
-> Service UUIDs, JSON schemas, and the folder push transport.
+Claude for macOS and Windows can stream session state, permission prompts,
+recent messages, and character packs to maker devices over Bluetooth LE. This
+repo is the firmware side of that example: a small desk pet that sleeps when
+Claude is disconnected, wakes when sessions are active, asks for permission
+approval on-device, and reacts to interaction.
 
-As an example, we built a desk pet on ESP32 that lives off permission
-approvals and interaction with Claude. It sleeps when nothing's happening,
-wakes when sessions start, gets visibly impatient when an approval prompt is
-waiting, and lets you approve or deny right from the device.
+> Building another device? You do not need this firmware. The stable wire
+> contract is [REFERENCE.md](REFERENCE.md): Nordic UART UUIDs, newline-delimited
+> JSON schemas, permission responses, and folder push transport.
 
 <p align="center">
-  <img src="docs/device.jpg" alt="M5StickC Plus running the buddy firmware" width="500">
+  <img src="docs/device.jpg" alt="Waveshare AMOLED desktop buddy running the firmware" width="720">
 </p>
 
-## Hardware
+## Current Target
 
-The firmware targets ESP32 with the Arduino framework. The current
-PlatformIO environment in `platformio.ini` targets the Waveshare AMOLED 1.8
-ESP32-S3 board (`waveshare-amoled-18`), and the pin/button mappings in
-`src/main.cpp` follow that hardware.
+The active PlatformIO environment is `waveshare-amoled-18`.
 
-For this board:
+Hardware assumed by the current firmware:
 
-- `A` is the upper right-side button
-- `B` is the lower right-side button
-- the USB-C port sits between `A` and `B`
+- Board: Waveshare ESP32-S3-Touch-AMOLED-1.8
+- Display: 368x448 SH8601 AMOLED over QSPI
+- Render model: 184x224 logical canvas, upscaled 2x to the panel
+- Power management: AXP2101
+- IMU: QMI8658
+- RTC: PCF85063
+- BLE stack: NimBLE-Arduino
+- Storage: LittleFS on the 8 MB flash layout in `no_ota_8mb.csv`
 
-If you fork this to a different ESP32 board, update the pin, display, and
-button mappings accordingly.
+Physical controls used today:
 
-## Flashing
+- `A`: upper right-side BOOT button
+- `B`: lower right-side PWR button, read through AXP2101 power-key IRQs
+- USB-C sits between `A` and `B`
 
-Install
-[PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/),
-then:
+The touchscreen hardware is reset by the boot sequence but is not currently
+used for input.
+
+## Port Status
+
+The Waveshare port is functional as a button-driven reference firmware.
+
+Implemented:
+
+- AMOLED bring-up through Arduino_GFX and a 2x framebuffer push path
+- BOOT/PWR button handling for screens, menu, approval, denial, and power off
+- AXP2101 battery/VBUS status, brightness, and power-key events
+- QMI8658 shake and face-down nap detection
+- PCF85063 RTC time sync from the desktop bridge
+- Secure BLE Nordic UART transport with passkey pairing
+- Claude heartbeat parsing, permission responses, and transcript HUD
+- ASCII pets, GIF character packs, and LittleFS character storage
+- Pet stats for mood, fed progress, energy, level, approvals, denials, and naps
+- Local debug state and USB framebuffer snapshot tooling
+
+Known gaps are tracked in [Roadmap](#roadmap).
+
+## Build And Flash
+
+Install PlatformIO Core, then build:
+
+```bash
+pio run
+```
+
+Flash firmware:
 
 ```bash
 pio run -t upload
 ```
 
-If you're starting from a previously-flashed device, wipe it first:
+If the board has stale data from another firmware, erase first:
 
 ```bash
-pio run -t erase && pio run -t upload
+pio run -t erase
+pio run -t upload
 ```
 
-Once running, you can also wipe everything from the device itself: **hold A
-→ settings → reset → factory reset → tap twice**.
+If you changed filesystem assets under `data/`, upload LittleFS:
 
-## Pairing
+```bash
+pio run -t uploadfs
+```
 
-To pair your device with Claude, first enable developer mode (**Help →
-Troubleshooting → Enable Developer Mode**). Then, open the Hardware Buddy
-window in **Developer → Open Hardware Buddy…**, click **Connect**, and pick
-your device from the list. macOS will prompt for Bluetooth permission on
-first connect; grant it.
+The device also has an on-device factory reset path:
 
-<p align="center">
-  <img src="docs/menu.png" alt="Developer → Open Hardware Buddy… menu item" width="420">
-  <img src="docs/hardware-buddy-window.png" alt="Hardware Buddy window with Connect button and folder drop target" width="420">
-</p>
+```text
+hold A -> settings -> reset -> factory reset -> tap B twice
+```
 
-Once paired, the bridge auto-reconnects whenever both sides are awake.
+## Pair With Claude
 
-If discovery isn't finding the stick:
+1. In Claude for macOS or Windows, enable developer mode:
+   `Help -> Troubleshooting -> Enable Developer Mode`.
+2. Open `Developer -> Open Hardware Buddy...`.
+3. Click `Connect`.
+4. Pick the device advertising as `Claude...`.
+5. Enter the 6-digit passkey shown on the device when the OS asks.
 
-- Make sure it's awake (any button press)
-- Check the stick's settings menu → bluetooth is on
+Once paired, the desktop bridge reconnects when both sides are awake.
+
+If discovery fails:
+
+- Wake the device with either button.
+- Confirm the device is advertising in serial logs: `[ble] advertising as ...`.
+- Use the device settings menu to confirm Bluetooth is enabled.
+- If the host has stale bonds, use Hardware Buddy `Forget` or send
+  `{"cmd":"unpair"}`.
 
 ## Controls
 
-Current `waveshare-amoled-18` button layout:
+| Input | Normal | Pet | Info | Approval |
+| --- | --- | --- | --- | --- |
+| `A` short press | next screen | next screen | next screen | approve |
+| `B` short press | scroll transcript | next page | next page | deny |
+| hold `A` | menu | menu | menu | menu |
+| hold `A` + tap `B` | next ASCII pet | next ASCII pet | next ASCII pet | - |
+| hold `B` about 6s | hard power off | hard power off | hard power off | - |
+| shake | dizzy animation | dizzy animation | dizzy animation | - |
+| face-down | nap | nap | nap | - |
 
-- `A`: upper right-side button
-- `B`: lower right-side button
-- `USB-C`: between `A` and `B`
+The screen powers off after 30 seconds of inactivity on battery. A permission
+prompt keeps the display awake. The first button press after screen-off only
+wakes the screen; it does not also trigger the normal action.
 
-|                         | Normal               | Pet         | Info        | Approval    |
-| ----------------------- | -------------------- | ----------- | ----------- | ----------- |
-| **A** (upper right)     | next screen          | next screen | next screen | **approve** |
-| **B** (lower right)     | scroll transcript    | next page   | next page   | **deny**    |
-| **Hold A**              | menu                 | menu        | menu        | menu        |
-| **Hold A + tap B**      | next ASCII pet       | next ASCII pet | next ASCII pet | —        |
-| **Hold B (~6s)**        | hard power off       |             |             |             |
-| **Shake**               | dizzy                |             |             | —           |
-| **Face-down**           | nap (energy refills) |             |             |             |
+## UI Modes
 
-The screen auto-powers-off after 30s of no interaction (kept on while an
-approval prompt is up). Any button press wakes it.
+Primary modes:
 
-## UI states
+- `Normal`: pet/character plus Claude session HUD.
+- `Pet`: stats and help pages.
+- `Info`: about, buttons, Claude, device, Bluetooth, and credits pages.
 
-The firmware has three primary display modes plus several temporary overlays.
+Transient overlays:
 
-- `Normal`: the pet/character is shown with the Claude session HUD at the bottom.
-- `Pet`: pet stats/help pages.
-- `Info`: six info pages (`About`, `Buttons`, `Claude`, `Device`, `Bluetooth`, `Credits`).
+- `Approval`: replaces the normal HUD while a permission prompt is pending.
+- `Menu`: settings, turn off, help, about, demo, close.
+- `Settings`: brightness, sound, bluetooth, wifi, led, transcript, ascii pet,
+  reset, back.
+- `Reset`: delete char, factory reset, back. Destructive actions require a
+  second confirmation tap.
+- `Passkey`: shown during BLE pairing.
+- `Clock`: shown on USB power while idle, if RTC time is valid.
+- `Nap`: entered by face-down detection; display dims until face-up.
+- `Screen off`: entered after idle timeout on battery.
 
-Transient overlays and special states:
+Render priority is:
 
-- `Approval`: replaces the HUD when Claude sends a permission prompt.
-- `Menu`: top-level menu with `settings`, `turn off`, `help`, `about`, `demo`, `close`.
-- `Settings`: `brightness`, `sound`, `bluetooth`, `wifi`, `led`, `transcript`, `ascii pet`, `reset`, `back`.
-- `Reset`: `delete char`, `factory reset`, `back`. Destructive actions require a second confirm tap within 3 seconds.
-- `Passkey`: shown during BLE pairing when a 6-digit passkey is requested.
-- `Clock`: shown on USB power while idle, with a valid RTC and no overlays active.
-- `Nap`: triggered by face-down detection; display dims until the device is turned face-up again.
-- `Screen off`: triggered after 30s idle on battery power; any button wakes it.
+- passkey
+- clock
+- info or pet mode
+- normal HUD
+- reset/settings/menu overlay on top
 
-Render priority is effectively:
+## Pet System
 
-- `Passkey`
-- `Clock`
-- `Info` or `Pet`
-- `Normal` HUD
-- then overlay one of `Reset`, `Settings`, or `Menu` on top when open
+The firmware has seven persona states:
 
-`Approval` is handled inside `Normal` and replaces the normal HUD contents.
+| State | Trigger | Feel |
+| --- | --- | --- |
+| `sleep` | bridge not connected | eyes closed, slow breathing |
+| `idle` | connected, nothing urgent | blinking, looking around |
+| `busy` | sessions actively running | working, sweating, focused |
+| `attention` | permission prompt pending | alert, impatient |
+| `celebrate` | level up or completed turn | confetti, bouncing |
+| `dizzy` | shake | spiral eyes, wobble |
+| `heart` | approved in under 5 seconds | floating hearts |
 
-## Button behavior by context
+Pet stats are local to the device:
 
-Physical buttons on the current `waveshare-amoled-18` board:
+- `Level`: cumulative output tokens, 50K tokens per level.
+- `Fed`: current-level token progress, one pip per 5K tokens.
+- `Mood`: approval response speed, reduced by a high denial ratio.
+- `Energy`: starts at 3/5, refills after a face-down nap, drains over time.
+- `Naps`: cumulative face-down time persisted in NVS.
 
-- `A`: upper right-side `BOOT` button
-- `B`: lower right-side `PWR` button
+The desktop protocol does not send mood, fed, energy, or level directly. It
+sends tokens, session counts, transcript entries, and permission prompts; the
+firmware derives pet behavior from those inputs.
 
-Global/default behavior:
+## ASCII Pets
 
-- `A` short press: cycle display mode `Normal -> Pet -> Info -> Normal`
-- `A` long press (~600ms): open/close menu
-- `B` long press (~6s): power off
-- `Hold A + tap B`: switch to the next ASCII pet
-- Shake: temporary `dizzy` animation
-- Face-down: enter nap
+The built-in ASCII renderer includes eighteen species. Each species implements
+the seven persona states above. Use `hold A + tap B` or
+`settings -> ascii pet` to cycle species. The selected species is stored in NVS.
 
-Context-sensitive behavior:
+## GIF Characters
 
-- `Normal`: `B` scrolls the transcript/HUD backlog
-- `Pet`: `B` changes page
-- `Info`: `B` changes page
-- `Menu`: `A` moves selection, `B` confirms
-- `Settings`: `A` moves selection, `B` changes/applies the selected item
-- `Reset`: `A` moves selection, `B` arms or confirms the selected reset action
-- `Approval`: `A` approves, `B` denies
-- `Screen off`: any button wakes the display; the wake tap is swallowed and does not trigger the normal action
+Custom GIF character packs can be pushed from the Hardware Buddy window by
+dropping a folder onto the drop target. The firmware writes the pack to
+LittleFS and switches to GIF mode live.
 
-## ASCII pets
-
-Eighteen pets, each with seven animations (sleep, idle, busy, attention,
-celebrate, dizzy, heart). Menu → "next pet" cycles them with a counter.
-Choice persists to NVS.
-
-## GIF pets
-
-If you want a custom GIF character instead of an ASCII buddy, drag a
-character pack folder onto the drop target in the Hardware Buddy window. The
-app streams it over BLE and the stick switches to GIF mode live. **Settings
-→ delete char** reverts to ASCII mode.
-
-A character pack is a folder with `manifest.json` and 96px-wide GIFs:
+A character pack is a flat folder with `manifest.json` and 96 px wide GIFs:
 
 ```json
 {
@@ -189,100 +219,104 @@ A character pack is a folder with `manifest.json` and 96px-wide GIFs:
 }
 ```
 
-State values can be a single filename or an array. Arrays rotate: each
-loop-end advances to the next GIF, useful for an idle activity carousel so
-the home screen doesn't loop one clip forever.
+State values may be a filename or an array. Arrays rotate after a GIF loop
+ends, which is useful for idle variation.
 
-GIFs are 96px wide; height up to ~140px stays on a 135×240 portrait screen.
-Crop tight to the character — transparent margins waste screen and shrink
-the sprite. `tools/prep_character.py` handles the resize: feed it source
-GIFs at any sizes and it produces a 96px-wide set where the character is the
-same scale in every state.
+Keep character art around 96 px wide. Heights up to roughly 140 px fit the
+current portrait layout. Crop tightly around the character; transparent margins
+waste screen area and make the sprite feel small.
 
-The whole folder must fit under 1.8MB —
-`gifsicle --lossy=80 -O3 --colors 64` typically cuts 40–60%.
+For local iteration, stage the example pack and upload it over USB:
 
-See `characters/bufo/` for a working example.
+```bash
+tools/flash_character.py characters/bufo
+```
 
-If you're iterating on a character and would rather skip the BLE round-trip,
-`tools/flash_character.py characters/bufo` stages it into `data/` and runs
-`pio run -t uploadfs` directly over USB.
+That script prepares `data/characters/bufo` and runs `pio run -t uploadfs`.
 
-## ASCII preview tool
+Use `settings -> reset -> delete char` to remove the current GIF character and
+return to ASCII mode.
 
-For local ASCII pet debugging, this repo includes a Chromium-only preview page:
+## Local Debugging
+
+The preview page can drive ASCII pet states and pull low-frequency framebuffer
+snapshots over USB.
+
+Start a local server:
 
 ```bash
 python3 -m http.server 8000
 ```
 
-Then open:
+Open:
 
 ```text
 http://localhost:8000/docs/preview.html
 ```
 
-The preview tool can:
-
-- drive the real device over Web Serial
-- switch species and send a local-only forced persona state
-- pull low-frequency USB screen snapshots into the same page so you can inspect
-  the real board output without saving image files
-
-The forced state command is intentionally repo-local and not part of
-`REFERENCE.md`:
+Repo-local debug command for forced state:
 
 ```json
 {"cmd":"debug_state","state":"auto|sleep|idle|busy|attention|celebrate|dizzy|heart"}
 ```
 
-Use `auto` to clear the override and return to the normal firmware-derived
-state machine.
-
-The preview page also supports a repo-local USB screenshot command:
+Repo-local USB screenshot command:
 
 ```json
 {"cmd":"screenshot"}
 ```
 
-It streams the current 184×224 framebuffer back over USB in chunked `rgb332`
-form for local debugging. This is intentionally outside the stable
-`REFERENCE.md` contract.
+The screenshot path streams the current 184x224 framebuffer as chunked `rgb332`
+data. These debug commands are intentionally outside the stable `REFERENCE.md`
+contract.
 
-For snapshot mode, prefer the page's higher USB baud options (`921600` by
-default). The mirror remains low-frequency, but the higher link speed keeps the
-refresh loop inside a practical debugging range.
+## Roadmap
 
-## The seven states
+Remaining Waveshare-specific adaptation work:
 
-| State       | Trigger                     | Feel                        |
-| ----------- | --------------------------- | --------------------------- |
-| `sleep`     | bridge not connected        | eyes closed, slow breathing |
-| `idle`      | connected, nothing urgent   | blinking, looking around    |
-| `busy`      | sessions actively running   | sweating, working           |
-| `attention` | approval pending            | alert, **LED blinks**       |
-| `celebrate` | level up (every 50K tokens) | confetti, bouncing          |
-| `dizzy`     | you shook the stick         | spiral eyes, wobbling       |
-| `heart`     | approved in under 5s        | floating hearts             |
+- Touch input: add FT3168 support or remove touchscreen assumptions from docs.
+  The current firmware resets touch hardware but does not read touch events.
+- Settings cleanup: either implement real behavior for `sound` and `wifi`, or
+  hide those settings. `sound` currently maps to an empty `beep()` stub, and
+  `wifi` only persists a preference.
+- Battery/status polish: document that AXP2101 does not expose instantaneous
+  battery current here, or replace the `mA` field with values this board can
+  report reliably.
+- Current-device media: replace inherited images that still describe the old
+  device with Waveshare AMOLED photos/screenshots.
+- Hardware validation checklist: keep a short release checklist for build,
+  flash, BLE pairing, permission approve/deny, GIF push, reset, nap, shake, and
+  screen-off behavior on the real board.
+- Touch-oriented UX, if desired: decide whether the touchscreen should be part
+  of the reference interaction model. If yes, map simple taps/swipes to existing
+  A/B actions before adding new screens.
 
-## Project layout
+Out of scope unless deliberately expanded:
 
-```
+- Supporting both the old M5StickC Plus and the Waveshare board in one codebase.
+- Adding WiFi features.
+- Adding new pet progression systems beyond the existing stats/animations.
+- Reintroducing landscape clock rendering.
+
+## Project Layout
+
+```text
 src/
-  main.cpp       — loop, state machine, UI screens
-  buddy.cpp      — ASCII species dispatch + render helpers
-  buddies/       — one file per species, seven anim functions each
-  ble_bridge.cpp — Nordic UART service, line-buffered TX/RX
-  character.cpp  — GIF decode + render
-  data.h         — wire protocol, JSON parse
-  xfer.h         — folder push receiver
-  stats.h        — NVS-backed stats, settings, owner, species choice
-characters/      — example GIF character packs
-tools/           — generators and converters
+  main.cpp       - hardware setup, loop, state machine, UI screens
+  buddy.cpp      - ASCII species dispatch and render helpers
+  buddies/       - one file per ASCII species
+  ble_bridge.cpp - secure Nordic UART Service over NimBLE
+  character.cpp  - GIF decode and render from LittleFS
+  data.h         - heartbeat JSON parse and state derivation
+  xfer.h         - folder push receiver and command acks
+  stats.h        - NVS-backed stats, settings, owner, species choice
+characters/      - example GIF character packs
+docs/            - preview/debug pages and port notes
+tools/           - character prep and upload helpers
 ```
 
 ## Availability
 
-The BLE API is only available when the desktop apps are in developer mode
-(**Help → Troubleshooting → Enable Developer Mode**). It's intended for
-makers and developers and isn't an officially supported product feature.
+The Hardware Buddy BLE API is only available when Claude desktop developer mode
+is enabled. It is intended for makers and developers and is not an officially
+supported product feature.
